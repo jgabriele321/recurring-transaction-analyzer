@@ -1,0 +1,347 @@
+1. Information Architecture
+1.1 Data Inputs
+PDF Statements Folder: A folder containing the last 3 or more months of PDF statements from various banks.
+Known Merchant Database (optional): A simple lookup (could be a JSON or CSV file) that maps merchant names or patterns to cancellation links (e.g., “Spotify” → https://www.spotify.com/us/account/subscription/).
+1.2 Data Outputs
+Recurring Transactions List:
+Merchant Name (e.g., “Spotify”)
+Transaction Amount (e.g., “$9.99”)
+Recurrence Frequency (e.g., “Monthly”)
+Cancellation Link (best guess based on known or discovered links)
+Aggregate Savings (sum of all recurring charges).
+1.3 Core Data Entities
+Transaction Record:
+Date: Date of the transaction.
+Merchant: Name or short descriptor of the transaction (e.g., “Netflix”).
+Amount: Financial amount (e.g., 9.99).
+Possible Cancellation Link: A URL if recognized or discovered.
+RecurringTransaction:
+Inherits/aggregates multiple Transaction Records with the same merchant (or fuzzy match).
+Recurring Frequency: Derive from seeing the same transaction monthly or at some interval.
+Total Monthly Cost: Summation of the transaction amounts that occur monthly.
+1.4 User Interface Components
+File/Folder Picker: Allows user to choose the folder with PDFs.
+Parse & Analyze Button: Triggers the PDF parsing and transaction analysis.
+Recurring Transactions Table:
+Columns: Merchant | Monthly Cost | Frequency | Cancel Link
+Checkboxes or toggles to mark whether the user wants to cancel.
+Total Savings Display: Sums up all the items marked for cancellation.
+
+2. Project Structure
+bash
+Copy
+Edit
+project_root/
+│
+├── main.py                  # Entrypoint for the GUI app
+├── gui/
+│   ├── app_window.py        # Main application window (Tkinter, PyQt, etc.)
+│   └── recurring_table.py   # Table or list widget showing recurring transactions
+│
+├── data/
+│   ├── known_merchants.json # Optional: Merchant name → cancellation link mapping
+│   └── sample_pdfs/         # Folder with sample PDFs for testing
+│
+├── services/
+│   ├── pdf_parser.py        # Logic to read PDF statements
+│   ├── transaction_finder.py# Contains the recurring transaction logic
+│   ├── link_finder.py       # Contains logic to guess merchant cancel links
+│   └── aggregator.py        # Aggregates and summarizes transactions
+│
+├── models/
+│   ├── transaction.py       # Transaction data structure
+│   └── recurring_transaction.py # RecurringTransaction data structure
+│
+├── requirements.txt         # Python dependencies
+└── README.md
+3. Core Functionality Overview
+PDF Parsing: Extract text from PDF files (via pdfplumber or PyPDF2), parse transactions.
+Recurring Transaction Detection: Identify recurring charges over multiple months.
+Cancellation Link Guessing: Use known-merchants mapping or generate a Google link.
+GUI: Display results, sum up potential savings.
+4. Step-by-Step Implementation Plan (with Checkpoints)
+Step 1: Project Setup
+Create Virtual Environment (optional but recommended):
+bash
+Copy
+Edit
+python -m venv venv
+source venv/bin/activate   # Mac/Linux
+venv\Scripts\activate      # Windows
+Install Dependencies:
+bash
+Copy
+Edit
+pip install PyPDF2 pdfplumber fuzzywuzzy python-Levenshtein tkinter
+Initialize Project Structure:
+Create the folders: gui, services, models, data.
+Create placeholder files: pdf_parser.py, transaction_finder.py, etc.
+Optional: Create known_merchants.json with test data.
+Checkpoint:
+
+Verify that you can activate your virtual environment successfully (pip list should show installed packages).
+Confirm your folder/file structure matches the outline (no typos, correct placements).
+Ensure known_merchants.json is in the correct place if you’re using it.
+Step 2: Parsing PDF Statements
+Implement pdf_parser.py using pdfplumber (recommended for better text extraction):
+python
+Copy
+Edit
+import pdfplumber
+
+def parse_pdf(file_path):
+    lines = []
+    with pdfplumber.open(file_path) as pdf:
+        for page in pdf.pages:
+            text = page.extract_text()
+            if text:
+                lines.extend(text.split('\n'))
+    return lines
+Refine the Parsing:
+If your statements have a consistent format, consider a regex or text-split approach to isolate relevant lines.
+If statements are scanned images, explore OCR (Tesseract) as a fallback, though that’s more complex.
+Checkpoint:
+
+Test with a sample PDF (place one in the data/sample_pdfs/ folder).
+Run parse_pdf on the sample.
+Inspect the resulting list of lines: Are they complete? Are they garbled?
+If needed, refine or correct your approach.
+Step 3: Modeling Transactions
+Create a Transaction class in models/transaction.py:
+python
+Copy
+Edit
+class Transaction:
+    def __init__(self, date, merchant, amount):
+        self.date = date
+        self.merchant = merchant
+        self.amount = amount
+
+    def __repr__(self):
+        return f"Transaction(date={self.date}, merchant='{self.merchant}', amount={self.amount})"
+In transaction_finder.py, add:
+A function extract_transactions(lines: List[str]) -> List[Transaction] that uses a regex or string parsing to identify date, merchant, and amount.
+
+python
+Copy
+Edit
+import re
+from models.transaction import Transaction
+
+transaction_pattern = re.compile(r'(\d{2}/\d{2}/\d{4})\s+(.+?)\s+\$?(\d+\.\d{2})')
+
+def extract_transactions(lines):
+    transactions = []
+    for line in lines:
+        match = transaction_pattern.search(line)
+        if match:
+            date_str = match.group(1)
+            merchant_str = match.group(2)
+            amount_str = match.group(3)
+            transactions.append(Transaction(date_str, merchant_str, float(amount_str)))
+    return transactions
+Checkpoint:
+
+Run the extract_transactions function on the lines you parsed from Step 2.
+Check: Do you get a list of Transaction objects with expected values (e.g., date format, merchant name, amount as a float)?
+Adjust the regex as needed based on your PDF statement format.
+Step 4: Detecting Recurring Transactions
+Create a RecurringTransaction class in models/recurring_transaction.py:
+python
+Copy
+Edit
+class RecurringTransaction:
+    def __init__(self, merchant):
+        self.merchant = merchant
+        self.transactions = []  # list of Transaction objects
+
+    def add_transaction(self, transaction):
+        self.transactions.append(transaction)
+
+    def get_monthly_cost(self):
+        """
+        For simplicity: sum the amounts / number of charges 
+        if they are known to occur monthly.
+        A more sophisticated approach might measure exact intervals.
+        """
+        total = sum(t.amount for t in self.transactions)
+        count = len(self.transactions)
+        return total / count if count else 0.0
+    def __repr__(self):
+        return f"RecurringTransaction(merchant='{self.merchant}', transactions={len(self.transactions)})"
+Grouping Logic (transaction_finder.py or aggregator.py):
+python
+Copy
+Edit
+from fuzzywuzzy import fuzz
+from models.recurring_transaction import RecurringTransaction
+
+def find_recurring_transactions(transactions):
+    recurring_dict = {}
+
+    def normalize_merchant(m):
+        return ''.join(e for e in m.lower() if e.isalnum())
+
+    for txn in transactions:
+        normalized = normalize_merchant(txn.merchant)
+        matched_key = None
+        for key in recurring_dict.keys():
+            if fuzz.ratio(normalized, key) > 80:  # threshold
+                matched_key = key
+                break
+
+        if matched_key:
+            recurring_dict[matched_key].add_transaction(txn)
+        else:
+            recurring_dict[normalized] = RecurringTransaction(txn.merchant)
+            recurring_dict[normalized].add_transaction(txn)
+
+    # Filter out any merchants that don't appear multiple times (or across multiple months)
+    final_list = []
+    for rtrans in recurring_dict.values():
+        if len(rtrans.transactions) >= 2:
+            final_list.append(rtrans)
+    return final_list
+Checkpoint:
+
+Run find_recurring_transactions on your set of Transaction objects from Step 3.
+Confirm that it groups same-merchant transactions under a RecurringTransaction.
+Check that fuzzy matching merges slight merchant name variations (e.g., “Spotify” vs. “Spotify.com”) but does not merge dissimilar merchants.
+Print out the resulting list of RecurringTransaction objects to ensure it aligns with real data in your test PDF(s).
+Step 5: Inferring Cancellation Links
+Implement link_finder.py:
+
+python
+Copy
+Edit
+import json, os
+from fuzzywuzzy import process
+
+# Load known merchants from JSON
+known_merchants = {}
+json_path = 'data/known_merchants.json'
+if os.path.exists(json_path):
+    with open(json_path) as f:
+        known_merchants = json.load(f)
+
+def get_cancellation_link(merchant: str):
+    # Attempt direct or fuzzy match
+    if known_merchants:
+        best_match, match_score = process.extractOne(merchant, known_merchants.keys())
+        if match_score > 80:
+            return known_merchants[best_match]
+
+    # Fallback: generic Google search
+    return f"https://www.google.com/search?q=cancel+{merchant}"
+Augment your recurring transaction analysis:
+
+For each RecurringTransaction, store or retrieve a link with get_cancellation_link(rtrans.merchant).
+Checkpoint:
+
+Add a small test snippet (or unit test) that calls get_cancellation_link("Netflix") (assuming Netflix is in your known_merchants.json).
+Check: If recognized, you get the known link; otherwise, you get the fallback Google search link.
+Step 6: Building the GUI
+Choose a Toolkit (Tkinter for simplicity).
+app_window.py example:
+python
+Copy
+Edit
+import tkinter as tk
+from tkinter import filedialog
+import os
+
+from services.pdf_parser import parse_pdf
+from services.transaction_finder import extract_transactions, find_recurring_transactions
+from services.link_finder import get_cancellation_link
+
+class AppWindow:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Recurring Transactions Analyzer")
+
+        self.folder_path_var = tk.StringVar()
+
+        # Folder selection
+        tk.Label(root, text="Select PDF Folder:").grid(row=0, column=0)
+        tk.Entry(root, textvariable=self.folder_path_var, width=50).grid(row=0, column=1)
+        tk.Button(root, text="Browse", command=self.browse_folder).grid(row=0, column=2)
+
+        # Analyze button
+        tk.Button(root, text="Analyze", command=self.analyze_statements).grid(row=1, column=0, columnspan=3)
+
+        # Results area
+        self.results_text = tk.Text(root, width=80, height=20)
+        self.results_text.grid(row=2, column=0, columnspan=3)
+
+        # Savings label
+        self.savings_var = tk.StringVar(value="Potential Monthly Savings: $0.00")
+        tk.Label(root, textvariable=self.savings_var).grid(row=3, column=0, columnspan=3)
+
+    def browse_folder(self):
+        folder = filedialog.askdirectory()
+        if folder:
+            self.folder_path_var.set(folder)
+
+    def analyze_statements(self):
+        folder = self.folder_path_var.get()
+        if not folder:
+            return
+
+        all_transactions = []
+        for file in os.listdir(folder):
+            if file.lower().endswith(".pdf"):
+                lines = parse_pdf(os.path.join(folder, file))
+                txns = extract_transactions(lines)
+                all_transactions.extend(txns)
+
+        recurring = find_recurring_transactions(all_transactions)
+
+        self.results_text.delete(1.0, tk.END)
+        total_savings = 0.0
+
+        for rtrans in recurring:
+            link = get_cancellation_link(rtrans.merchant)
+            monthly_estimate = rtrans.get_monthly_cost()
+            total_savings += monthly_estimate
+
+            display_str = (
+                f"Merchant: {rtrans.merchant}\n"
+                f"  Monthly Est.: ${monthly_estimate:.2f}\n"
+                f"  Cancel Link: {link}\n\n"
+            )
+            self.results_text.insert(tk.END, display_str)
+
+        self.savings_var.set(f"Potential Monthly Savings: ${total_savings:.2f}")
+
+def run_app():
+    root = tk.Tk()
+    app = AppWindow(root)
+    root.mainloop()
+
+if __name__ == "__main__":
+    run_app()
+Checkpoint:
+
+Launch the app (python gui/app_window.py or whichever file holds run_app()).
+Browse to your folder of PDFs.
+Check that the text area populates with recurring merchants, estimated monthly cost, and links.
+Verify that the total savings at the bottom matches the sum of identified monthly charges.
+Step 7: Final Testing & Refinement
+Test with Real PDFs:
+Validate the parse logic with multiple statement formats.
+Tweak the regex or line splitting if your bank statements differ in layout.
+Refine Fuzzy Matching:
+If too many unrelated merchants are merged, lower your fuzz.ratio threshold from 80 to 70–75.
+If you still get too many merges, you might do an exact match first, then fuzzy match only if that fails.
+Optional Enhancements:
+Add checkboxes next to each recurring charge so the user can see a dynamic updated total as they decide which ones they’d actually cancel.
+Consider a more robust approach to detecting monthly intervals, for example by comparing transaction dates across different statements.
+Deployment:
+Use PyInstaller or similar to create a standalone application if you want to distribute it without requiring a Python environment.
+Checkpoint:
+
+Check that the user interface logic, monthly cost calculations, and fuzzy matching all produce reliable results with your sample data.
+Confirm that the final total savings displayed lines up with actual recurring charges from real statements.
+Update documentation (in README.md) if your plan or usage instructions changed during testing.
+Summary
+With these added checkpoints at the end of each step, you have clear criteria to confirm that each component (environment setup, PDF parsing, transaction modeling, recurring detection, link inference, and GUI) is working before moving to the next phase. By following this plan step by step—and verifying each checkpoint—you’ll ensure a robust, reliable implementation of your simple GUI app to identify and help cancel recurring transactions.
