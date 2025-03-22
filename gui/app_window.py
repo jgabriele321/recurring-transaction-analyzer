@@ -5,8 +5,8 @@ import logging
 from typing import Dict, List
 import webbrowser
 
-from services.pdf_parser import parse_pdf_directory
-from services.transaction_finder import extract_transactions, group_similar_transactions, identify_recurring_transactions
+from services.csv_parser import CSVParser
+from services.transaction_finder import group_similar_transactions, identify_recurring_transactions
 from services.link_finder import LinkFinder
 from models.transaction import Transaction
 
@@ -17,10 +17,11 @@ class AppWindow:
         """Initialize the main application window."""
         self.root = root
         self.root.title("Recurring Transaction Analyzer")
-        self.root.geometry("900x600")
+        self.root.geometry("1200x720")  # Increased from 1000x600 (20% larger)
         
         # Initialize services
         self.link_finder = LinkFinder()
+        self.csv_parser = CSVParser()
         
         # Create the main layout
         self._create_widgets()
@@ -41,7 +42,7 @@ class AppWindow:
         input_frame.pack(fill=tk.X, padx=10)
         
         # Folder selection
-        ttk.Label(input_frame, text="PDF Statements Folder:").pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Label(input_frame, text="CSV Statements Folder:").pack(side=tk.LEFT, padx=(0, 5))
         self.folder_path_var = tk.StringVar()
         ttk.Entry(input_frame, textvariable=self.folder_path_var, width=50).pack(side=tk.LEFT, padx=5)
         ttk.Button(input_frame, text="Browse", command=self._browse_folder).pack(side=tk.LEFT, padx=5)
@@ -52,7 +53,7 @@ class AppWindow:
         results_frame.pack(fill=tk.BOTH, expand=True)
         
         # Create a treeview for recurring transactions
-        columns = ("Remove", "Merchant", "Monthly Cost", "Frequency", "Cancel Link")
+        columns = ("Remove", "Merchant", "Monthly Cost", "Credit Card", "Frequency", "Cancel Link")
         self.tree = ttk.Treeview(results_frame, columns=columns, show="headings")
         
         # Set column headings with sorting
@@ -61,7 +62,9 @@ class AppWindow:
         
         for col in columns[1:]:  # Skip the Remove column for sorting
             self.tree.heading(col, text=col, command=lambda c=col: self._sort_column(c))
-            width = 150 if col != "Cancel Link" else 200
+            width = 180 if col != "Cancel Link" else 240  # Increased column widths by 20%
+            if col == "Frequency":
+                width = 120  # Adjust width for frequency column
             self.tree.column(col, width=width)
         
         # Bind click events
@@ -88,8 +91,8 @@ class AppWindow:
             
             if column == "#1":  # Remove column
                 self._remove_item(item)
-            elif column == "#5":  # Cancel Link column
-                link = self.tree.item(item)['values'][4]
+            elif column == "#6":  # Cancel Link column
+                link = self.tree.item(item)['values'][5]
                 if link and link != "N/A":
                     webbrowser.open(link)
     
@@ -114,6 +117,9 @@ class AppWindow:
         # Convert amounts to float for proper numeric sorting
         if column == "Monthly Cost":
             items = [(float(amount.replace("$", "").replace(",", "")), item) for amount, item in items]
+        elif column == "Frequency":
+            # Extract the number from "X times" format for sorting
+            items = [(int(freq.split()[0]), item) for freq, item in items]
         
         # Sort the items
         items.sort(reverse=self.sort_reverse)
@@ -122,7 +128,7 @@ class AppWindow:
         for index, (val, item) in enumerate(items):
             self.tree.move(item, "", index)
         
-        # Reverse sort direction for next sort
+        # Update sort indicator
         self.tree.heading(column, text=column + (" ↑" if self.sort_reverse else " ↓"))
     
     def _browse_folder(self):
@@ -132,10 +138,10 @@ class AppWindow:
             self.folder_path_var.set(folder)
     
     def _analyze_statements(self):
-        """Analyze PDF statements in the selected folder."""
+        """Analyze CSV statements in the selected folder."""
         folder = self.folder_path_var.get()
         if not folder:
-            messagebox.showerror("Error", "Please select a folder containing PDF statements.")
+            messagebox.showerror("Error", "Please select a folder containing CSV statements.")
             return
         
         try:
@@ -147,15 +153,11 @@ class AppWindow:
             for col in self.tree["columns"]:
                 self.tree.heading(col, text=col)
             
-            # Parse PDFs and extract transactions
-            results = parse_pdf_directory(folder)
-            all_transactions = []
-            for filename, lines in results.items():
-                transactions = extract_transactions(lines)
-                all_transactions.extend(transactions)
+            # Parse CSVs and extract transactions
+            all_transactions = self.csv_parser.parse_directory(folder)
             
             if not all_transactions:
-                messagebox.showwarning("No Transactions", "No transactions found in the selected PDFs.")
+                messagebox.showwarning("No Transactions", "No transactions found in the selected CSVs.")
                 return
             
             # Group similar transactions and identify recurring ones
@@ -172,12 +174,17 @@ class AppWindow:
                 # Get cancellation link
                 cancel_link = self.link_finder.get_cancellation_link(merchant)
                 
+                # Get credit card (use the most recent transaction's card)
+                recent_transaction = max(transactions, key=lambda t: t.date)
+                credit_card = recent_transaction.credit_card
+                
                 # Add to treeview with X button
                 self.tree.insert("", tk.END, values=(
                     "❌",  # Remove button
                     merchant,
                     f"${monthly_cost:.2f}",
-                    "Monthly",
+                    credit_card,
+                    f"{len(transactions)} times",  # Show actual count instead of "Monthly"
                     cancel_link or "N/A"
                 ))
             
