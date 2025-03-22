@@ -152,7 +152,7 @@ def group_similar_transactions(transactions: List[Transaction], similarity_thres
     return groups
 
 def identify_recurring_transactions(grouped_transactions: dict[str, List[Transaction]], 
-                                 min_occurrences: int = 2,
+                                 min_occurrences: int = 3,
                                  max_days_between: int = 35,
                                  amount_variance_threshold: float = 0.10) -> dict[str, List[Transaction]]:
     """
@@ -241,11 +241,11 @@ def find_recurring_transactions(transactions, similarity_threshold=0.85):
         if not matched:
             merchant_groups[transaction.merchant] = [transaction]
     
-    # Filter for recurring transactions (at least 2 transactions)
+    # Filter for recurring transactions (at least 3 transactions)
     recurring = {
         merchant: transactions 
         for merchant, transactions in merchant_groups.items()
-        if len(transactions) >= 2
+        if len(transactions) >= 3  # Changed from 2 to 3
     }
     
     return recurring

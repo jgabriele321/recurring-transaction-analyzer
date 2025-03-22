@@ -10,10 +10,11 @@ class Transaction:
     date: datetime
     merchant: str
     amount: float
+    credit_card: str
     description: Optional[str] = None
     
     @classmethod
-    def from_string(cls, date_str: str, merchant: str, amount_str: str, description: Optional[str] = None):
+    def from_string(cls, date_str: str, merchant: str, amount_str: str, credit_card: str, description: Optional[str] = None):
         """
         Create a Transaction from string values.
         
@@ -21,6 +22,7 @@ class Transaction:
             date_str (str): Date string in format MM/DD/YYYY
             merchant (str): Merchant name
             amount_str (str): Amount string (can include $ and commas)
+            credit_card (str): Name of the credit card
             description (str, optional): Additional transaction description
             
         Returns:
@@ -48,6 +50,7 @@ class Transaction:
             date=date,
             merchant=merchant.strip(),
             amount=amount,
+            credit_card=credit_card.strip(),
             description=description.strip() if description else None
         )
     
@@ -55,4 +58,4 @@ class Transaction:
         """String representation of the transaction."""
         date_str = self.date.strftime("%m/%d/%Y")
         desc = f" - {self.description}" if self.description else ""
-        return f"{date_str} | {self.merchant} | ${self.amount:.2f}{desc}" 
+        return f"{date_str} | {self.merchant} | ${self.amount:.2f} | {self.credit_card}{desc}" 
